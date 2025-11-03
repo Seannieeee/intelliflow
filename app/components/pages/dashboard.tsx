@@ -32,10 +32,11 @@ import { signOut, onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "next/navigation";
 
 export default function IntelliFlowDashboard() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // Changed to false for mobile-first
   const [activeNav, setActiveNav] = useState("home");
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const router = useRouter();
 
   // ✅ Check authentication on mount
@@ -52,13 +53,17 @@ export default function IntelliFlowDashboard() {
   }, [router]);
 
   const handleLogout = async () => {
-    await signOut(auth);
-    router.push("/login");
+    try {
+      await signOut(auth);
+      router.push("/login");
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen text-gray-500 text-lg">
+      <div className="flex items-center justify-center h-screen bg-gray-900 text-gray-500 text-lg">
         Loading dashboard...
       </div>
     );
@@ -116,29 +121,25 @@ export default function IntelliFlowDashboard() {
 
   return (
     <div className="flex h-screen bg-gray-900 font-sans overflow-hidden">
-      {/* Sidebar */}
+      {/* Sidebar - Desktop always visible, Mobile slide-in */}
       <aside
         className={`${
-          sidebarOpen ? "w-64" : "w-20"
-        } bg-gray-800 border-r border-gray-700 transition-all duration-300 flex flex-col fixed lg:relative h-full z-30 ${
-          sidebarOpen ? "" : "lg:flex hidden"
-        }`}
+          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        } w-64 bg-gray-800 border-r border-gray-700 transition-transform duration-300 flex flex-col fixed lg:relative h-full z-30`}
       >
         {/* Logo Section */}
         <div className="h-16 flex items-center justify-between px-6 border-b border-gray-700">
-          {sidebarOpen && (
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-teal-500 rounded-lg flex items-center justify-center">
-                <Zap className="w-5 h-5 text-white" />
-              </div>
-              <span className="font-bold text-white">IntelliFlow</span>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-teal-500 rounded-lg flex items-center justify-center">
+              <Zap className="w-5 h-5 text-white" />
             </div>
-          )}
+            <span className="font-bold text-white">IntelliFlow</span>
+          </div>
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-1.5 hover:bg-gray-700 rounded-lg transition-colors"
+            onClick={() => setSidebarOpen(false)}
+            className="lg:hidden p-1.5 hover:bg-gray-700 rounded-lg transition-colors"
           >
-            {sidebarOpen ? <X className="w-5 h-5 text-gray-300" /> : <Menu className="w-5 h-5 text-gray-300" />}
+            <X className="w-5 h-5 text-gray-300" />
           </button>
         </div>
 
@@ -147,7 +148,12 @@ export default function IntelliFlowDashboard() {
           {navigationItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => item.active && setActiveNav(item.id)}
+              onClick={() => {
+                if (item.active) {
+                  setActiveNav(item.id);
+                  setSidebarOpen(false); // Close sidebar on mobile after selection
+                }
+              }}
               disabled={!item.active}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
                 activeNav === item.id
@@ -158,17 +164,13 @@ export default function IntelliFlowDashboard() {
               }`}
             >
               <item.icon className="w-5 h-5 flex-shrink-0" />
-              {sidebarOpen && (
-                <>
-                  <span className="text-sm font-medium flex-1 text-left">
-                    {item.label}
-                  </span>
-                  {item.badge && (
-                    <span className="text-xs px-2 py-0.5 bg-gray-700 text-gray-400 rounded-full">
-                      {item.badge}
-                    </span>
-                  )}
-                </>
+              <span className="text-sm font-medium flex-1 text-left">
+                {item.label}
+              </span>
+              {item.badge && (
+                <span className="text-xs px-2 py-0.5 bg-gray-700 text-gray-400 rounded-full">
+                  {item.badge}
+                </span>
               )}
             </button>
           ))}
@@ -177,21 +179,48 @@ export default function IntelliFlowDashboard() {
         {/* Logout */}
         <div className="px-3 py-4 border-t border-gray-700">
           <button
-            onClick={handleLogout}
+            onClick={() => setShowLogoutModal(true)}
             className="w-full flex items-center gap-3 px-3 py-2.5 text-gray-300 hover:bg-red-900/30 hover:text-red-400 rounded-lg transition-all"
           >
             <LogOut className="w-5 h-5 flex-shrink-0" />
-            {sidebarOpen && <span className="text-sm font-medium">Logout</span>}
+            <span className="text-sm font-medium">Logout</span>
           </button>
         </div>
       </aside>
 
-      {/* Overlay for mobile when sidebar is open */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-20 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        ></div>
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 max-w-md w-full shadow-2xl relative">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center">
+                <LogOut className="w-6 h-6 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">Confirm Logout</h3>
+                <p className="text-sm text-gray-400">Are you sure you want to sign out?</p>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowLogoutModal(false)}
+                className="flex-1 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowLogoutModal(false);
+                  handleLogout();
+                }}
+                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Main Content */}
@@ -200,7 +229,7 @@ export default function IntelliFlowDashboard() {
         <header className="h-16 bg-gray-800 border-b border-gray-700 px-4 sm:px-8 flex items-center justify-between flex-shrink-0">
           {/* Mobile Menu Button */}
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            onClick={() => setSidebarOpen(true)}
             className="lg:hidden p-2 hover:bg-gray-700 rounded-lg transition-colors mr-2"
           >
             <Menu className="w-5 h-5 text-gray-300" />
