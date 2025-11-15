@@ -1,58 +1,67 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-export async function POST(req: NextRequest) {
+type ChatHistoryItem = { role: "user" | "assistant"; content: string };
+type SystemContext = {
+  userSummary?: {
+    totalTasks?: number;
+    completed?: number;
+    overdue?: number;
+    upcomingDue?: Array<{ id: string; title: string; dueDate: string }>;
+    focusAreas?: string[];
+  };
+  app?: {
+    name?: string;
+    version?: string;
+    features?: string[];
+    components?: string[];
+  };
+  backend?: {
+    type?: "laravel" | "node" | "other";
+    apiBaseUrl?: string;
+    resources?: string[];
+  };
+};
+
+export async function POST(request: Request) {
   try {
-    const { message } = await req.json();
+    const body = await request.json();
+    const { prompt, context, history } = body;
 
-    if (!message) {
-      return NextResponse.json({ error: "Message is required" }, { status: 400 });
+    if (!prompt || typeof prompt !== "string" || prompt.trim() === "") {
+      return NextResponse.json(
+        { error: "Prompt is required and must be a non-empty string" },
+        { status: 400 }
+      );
     }
 
-    const apiKey = process.env.HF_API_KEY;
-    console.log("HF API KEY EXISTS:", !!apiKey);
-
+    const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: "API key not configured" }, { status: 500 });
+      return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
     }
 
-    console.log("🔥 Sending request to HuggingFace Router...");
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-    const response = await fetch("https://api-inference.huggingface.co/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemma-2", // free model
-        messages: [{ role: "user", content: message }],
-        max_tokens: 250,
-        temperature: 0.7,
-      }),
-    });
+    const systemPrompt = `You are IntelliFlow's embedded AI assistant...`;
 
-    console.log("HF STATUS:", response.status);
+    const contextBlock = context ? `\nSystem Context:\n${JSON.stringify(context)}` : "";
+    const historyBlock = Array.isArray(history)
+      ? `\nRecent Conversation:\n${history
+          .slice(-6)
+          .map((h: any) => `${h.role.toUpperCase()}: ${h.content}`)
+          .join("\n")}`
+      : "";
 
-    let data: any = null;
-    try {
-      data = await response.json();
-      console.log("HF DATA:", JSON.stringify(data).substring(0, 300));
-    } catch {
-      console.log("HF RAW DATA: (not JSON)");
-    }
+    const composed = `${systemPrompt}${contextBlock}${historyBlock}\n\nUSER: ${prompt}`;
 
-    if (!response.ok) {
-      const errMsg = data?.error?.message || data?.error || `HF API error ${response.status}`;
-      return NextResponse.json({ error: `HF API Error: ${errMsg}` }, { status: response.status });
-    }
+    const result = await model.generateContent(composed);
+    const text = result.response.text().replace(/```[\s\S]*?```/g, "").trim();
 
-    const aiResponse = data?.choices?.[0]?.message?.content || "No response generated.";
-
-    return NextResponse.json({ response: aiResponse });
-  } catch (error: any) {
-    console.error("CHAT ROUTE ERROR:", error);
+    return NextResponse.json({ text });
+  } catch (error: unknown) {
     return NextResponse.json(
-      { error: `Internal server error: ${error.message}` },
+      { error: error instanceof Error ? error.message : "Internal server error" },
       { status: 500 }
     );
   }

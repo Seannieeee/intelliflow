@@ -1,26 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import {
-  Bot,
-  Send,
-  RefreshCw,
-  Sparkles,
-  Loader2,
-  User,
-  AlertCircle,
-} from "lucide-react";
-
-// TypeScript declarations for Puter.js
-declare global {
-  interface Window {
-    puter?: {
-      ai?: {
-        chat: (messages: any[]) => Promise<any>;
-      };
-    };
-  }
-}
+import { Bot, Send, RefreshCw, Sparkles, Loader2, User, AlertCircle } from "lucide-react";
 
 interface ChatMessage {
   id: string;
@@ -33,80 +14,70 @@ export default function AssistantPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [puterReady, setPuterReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load Puter.js on component mount
+  // Load persisted history or set welcome message
   useEffect(() => {
-    const loadPuterScript = () => {
-      // Check if already loaded
-      if (window.puter && window.puter.ai) {
-        setPuterReady(true);
-        console.log("✅ Puter.js AI ready");
-        return;
+    try {
+      const stored = localStorage.getItem("assistantMessages");
+      if (stored) {
+        const parsed = JSON.parse(stored) as Array<{
+          id: string;
+          role: "user" | "assistant";
+          content: string;
+          timestamp: string;
+        }>;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(
+            parsed.map((m) => ({ ...m, timestamp: new Date(m.timestamp) }))
+          );
+          return;
+        }
       }
+    } catch (e) {
+      console.warn("Failed to restore messages", e);
+    }
+    setMessages([
+      {
+        id: "welcome",
+        role: "assistant",
+        content: `Hello! 👋 I'm your AI task assistant powered by Google Gemini.
 
-      // Check if script already exists
-      const existingScript = document.querySelector(
-        'script[src="https://js.puter.com/v2/"]'
-      );
-      if (existingScript) {
-        existingScript.addEventListener("load", () => {
-          setPuterReady(true);
-          console.log("✅ Puter.js loaded");
-        });
-        return;
-      }
+I can help you with:
+✅ Task Management – Planning, prioritizing, organizing tasks
+📝 Productivity Tips – Strategies to boost efficiency
+🎯 Goal Setting – Turning big goals into actionable steps
+💡 Problem Solving – Creative approaches to challenges
+📊 Decision Making – Weighing options effectively
 
-      // Load script
-      const script = document.createElement("script");
-      script.src = "https://js.puter.com/v2/";
-      script.async = true;
-
-      script.onload = () => {
-        setPuterReady(true);
-        console.log("✅ Puter.js loaded successfully");
-      };
-
-      script.onerror = () => {
-        console.error("❌ Failed to load Puter.js");
-        setError("Failed to load AI service. Please refresh the page.");
-      };
-
-      document.head.appendChild(script);
-    };
-
-    loadPuterScript();
+What would you like help with today?`,
+        timestamp: new Date(),
+      },
+    ]);
   }, []);
+
+  // Persist messages on change
+  useEffect(() => {
+    if (messages.length === 0) return;
+    try {
+      const serializable = messages.map((m) => ({
+        ...m,
+        timestamp: m.timestamp.toISOString(),
+      }));
+      localStorage.setItem(
+        "assistantMessages",
+        JSON.stringify(serializable)
+      );
+    } catch (e) {
+      console.warn("Failed to persist messages", e);
+    }
+  }, [messages]);
 
   // Auto-scroll to latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  // Initialize with welcome message
-  useEffect(() => {
-    if (puterReady && messages.length === 0) {
-      setMessages([
-        {
-          id: "welcome",
-          role: "assistant",
-          content: `Hello! 👋 I'm your AI task assistant powered by advanced language models.
-
-I can help you with:
-✅ **Task Management** - Planning, prioritizing, and organizing tasks
-📝 **Productivity Tips** - Strategies to boost your efficiency
-🎯 **Goal Setting** - Breaking down big goals into actionable steps
-💡 **Problem Solving** - Creative solutions to challenges
-📊 **Decision Making** - Weighing options and making informed choices
-
-What would you like help with today?`,
-          timestamp: new Date(),
-        },
-      ]);
-    }
-  }, [puterReady, messages.length]);
 
   /**
    * Send message to AI assistant
@@ -115,92 +86,60 @@ What would you like help with today?`,
     const content = inputMessage.trim();
     if (!content || isLoading) return;
 
+    setIsLoading(true);
+    setError(null);
+
     // Add user message
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      content: content,
+      content,
       timestamp: new Date(),
     };
-
     setMessages((prev) => [...prev, userMessage]);
     setInputMessage("");
-    setIsLoading(true);
-    setError(null);
 
     try {
-      if (!puterReady || !window.puter?.ai) {
-        throw new Error("AI service is not available");
+      // Add a placeholder assistant message while waiting for response
+      const placeholderId = `assistant-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        { id: placeholderId, role: "assistant", content: "", timestamp: new Date() },
+      ]);
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          prompt: content,
+          history: messages.map(m => ({
+            role: m.role,
+            content: m.content
+          }))
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null);
+        const errorMsg = errorData?.error || errorData?.message || `API error: ${res.status}`;
+        throw new Error(errorMsg);
       }
-
-      // Build conversation history (last 10 messages for context)
-      const conversationHistory = messages
-        .slice(-10)
-        .map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        }));
-
-      // System prompt for task assistant
-      const systemPrompt = `You are a helpful, friendly AI task assistant. You help users with:
-- Task management and organization
-- Productivity and time management advice  
-- Breaking down complex projects into steps
-- Goal setting and planning
-- Problem-solving and decision making
-
-Provide practical, actionable advice. Be concise but thorough. Use bullet points and formatting for clarity when helpful.`;
-
-      // Prepare messages for AI
-      const aiMessages = [
-        { role: "system", content: systemPrompt },
-        ...conversationHistory,
-        { role: "user", content: content },
-      ];
-
-      // Call Puter.js AI
-      const aiResponse = await window.puter.ai.chat(aiMessages);
-
-      // Parse response
-      let responseText = "";
-      if (typeof aiResponse === "string") {
-        responseText = aiResponse;
-      } else if (aiResponse?.message) {
-        responseText =
-          typeof aiResponse.message === "string"
-            ? aiResponse.message
-            : aiResponse.message.content || JSON.stringify(aiResponse.message);
-      } else if (aiResponse?.content) {
-        responseText = aiResponse.content;
-      } else if (aiResponse?.text) {
-        responseText = aiResponse.text;
-      } else {
-        responseText = aiResponse?.toString() || "I received your message but couldn't generate a response.";
+      
+      const data: { text?: string; error?: string } = await res.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
       }
-
-      // Add AI response
-      const aiMessage: ChatMessage = {
-        id: `ai-${Date.now()}`,
-        role: "assistant",
-        content: responseText,
-        timestamp: new Date(),
-      };
-
-      setMessages((prev) => [...prev, aiMessage]);
-    } catch (error: any) {
-      console.error("AI chat error:", error);
-      setError("Failed to get AI response. Please try again.");
-
-      // Add error message
-      const errorMessage: ChatMessage = {
-        id: `error-${Date.now()}`,
-        role: "assistant",
-        content:
-          "I apologize, but I'm having trouble connecting right now. Please try again in a moment.",
-        timestamp: new Date(),
-      };
-
-      setMessages((prev) => [...prev, errorMessage]);
+      
+      const responseText = data.text?.trim() || "I couldn't generate a response.";
+      setMessages((prev) => prev.map((m) => (m.id === placeholderId ? { ...m, content: responseText } : m)));
+    } catch (err) {
+      console.error("AI response error:", err);
+      const errorMessage = err instanceof Error ? err.message : "Failed to get AI response";
+      setError(errorMessage);
+      
+      // Remove the placeholder message if there was an error
+      setMessages((prev) => prev.filter(m => m.content !== ""));
     } finally {
       setIsLoading(false);
     }
@@ -212,12 +151,15 @@ Provide practical, actionable advice. Be concise but thorough. Use bullet points
   const clearConversation = () => {
     setMessages([]);
     setError(null);
+    try {
+      localStorage.removeItem("assistantMessages");
+    } catch {}
   };
 
   /**
    * Handle Enter key press
    */
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -244,21 +186,10 @@ Provide practical, actionable advice. Be concise but thorough. Use bullet points
 
         {/* Status & Clear Button */}
         <div className="flex items-center gap-2">
-          {puterReady ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-500/20 border border-green-500/30 rounded-lg">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <span className="text-xs text-green-400 hidden sm:inline">
-                AI Online
-              </span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/30 rounded-lg">
-              <Loader2 className="w-3 h-3 text-yellow-400 animate-spin" />
-              <span className="text-xs text-yellow-400 hidden sm:inline">
-                Loading...
-              </span>
-            </div>
-          )}
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-green-500/20 border border-green-500/30 rounded-lg">
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            <span className="text-xs text-green-400 hidden sm:inline">Gemini Ready</span>
+          </div>
 
           {messages.length > 0 && (
             <button
@@ -275,10 +206,15 @@ Provide practical, actionable advice. Be concise but thorough. Use bullet points
       {/* Error Alert */}
       {error && (
         <div className="mb-4 bg-red-500/20 border border-red-500/30 rounded-lg p-4 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-          <div>
+          <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
             <p className="text-red-400 text-sm font-medium">Error</p>
             <p className="text-red-300 text-sm">{error}</p>
+            {error.includes("quota") && (
+              <p className="text-red-200 text-xs mt-2">
+                Tip: Wait a few seconds and try again, or check your API quota.
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -287,7 +223,7 @@ Provide practical, actionable advice. Be concise but thorough. Use bullet points
       <div className="bg-gray-800 border border-gray-700 rounded-xl flex flex-col h-[calc(100vh-250px)] min-h-[500px]">
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.length === 0 && puterReady && (
+          {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center py-12">
               <div className="w-16 h-16 bg-purple-500/20 rounded-full flex items-center justify-center mb-4">
                 <Sparkles className="w-8 h-8 text-purple-400" />
@@ -296,8 +232,7 @@ Provide practical, actionable advice. Be concise but thorough. Use bullet points
                 Ready to assist!
               </h3>
               <p className="text-gray-400 text-sm max-w-md">
-                Start a conversation by typing a message below. I'm here to help
-                with your tasks and productivity.
+                Start a conversation by typing a message below. I&apos;m here to help with tasks and productivity.
               </p>
             </div>
           )}
@@ -311,7 +246,7 @@ Provide practical, actionable advice. Be concise but thorough. Use bullet points
             >
               {/* Avatar */}
               <div
-                className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
                   message.role === "user"
                     ? "bg-blue-500/20"
                     : "bg-purple-500/20"
@@ -354,7 +289,7 @@ Provide practical, actionable advice. Be concise but thorough. Use bullet points
           {/* Loading Indicator */}
           {isLoading && (
             <div className="flex gap-3">
-              <div className="w-8 h-8 bg-purple-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
+              <div className="w-8 h-8 bg-purple-500/20 rounded-lg flex items-center justify-center shrink-0">
                 <Bot className="w-4 h-4 text-purple-400" />
               </div>
               <div className="bg-gray-700/50 border border-gray-600/30 rounded-lg p-3">
@@ -376,18 +311,14 @@ Provide practical, actionable advice. Be concise but thorough. Use bullet points
               type="text"
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder={
-                puterReady
-                  ? "Type your message..."
-                  : "Loading AI assistant..."
-              }
-              disabled={!puterReady || isLoading}
+              onKeyDown={handleKeyDown}
+              placeholder="Type your message..."
+              disabled={isLoading}
               className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <button
               onClick={sendMessage}
-              disabled={!puterReady || isLoading || !inputMessage.trim()}
+              disabled={isLoading || !inputMessage.trim()}
               className="px-4 py-2 bg-purple-500 hover:bg-purple-600 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg text-white transition-colors flex items-center gap-2"
             >
               <Send className="w-4 h-4" />
@@ -402,8 +333,7 @@ Provide practical, actionable advice. Be concise but thorough. Use bullet points
 
       {/* Footer Info */}
       <div className="mt-4 text-center text-xs text-gray-500">
-        Powered by Puter.js AI • Responses are generated by AI and may not
-        always be accurate
+        Powered by Google Gemini • Responses are generated by AI and may not always be accurate
       </div>
     </div>
   );
