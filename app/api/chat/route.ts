@@ -1,59 +1,80 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-export async function POST(req: NextRequest) {
+type ChatHistoryItem = { role: "user" | "assistant"; content: string };
+type SystemContext = {
+  userSummary?: {
+    totalTasks?: number;
+    completed?: number;
+    overdue?: number;
+    upcomingDue?: Array<{ id: string; title: string; dueDate: string }>;
+    focusAreas?: string[];
+  };
+  app?: {
+    name?: string;
+    version?: string;
+    features?: string[];
+    components?: string[];
+  };
+  backend?: {
+    type?: "laravel" | "node" | "other";
+    apiBaseUrl?: string;
+    resources?: string[];
+  };
+};
+
+export async function POST(request: Request) {
   try {
-    const { message } = await req.json();
+    const { prompt, context, history }: { prompt?: unknown; context?: SystemContext; history?: ChatHistoryItem[] } = await request.json();
 
-    if (!message) {
-      return NextResponse.json({ error: "Message is required" }, { status: 400 });
+    if (!prompt || typeof prompt !== "string") {
+      return NextResponse.json({ message: "Prompt is required" }, { status: 400 });
     }
 
-    const apiKey = process.env.HF_API_KEY;
-    console.log("HF API KEY EXISTS:", !!apiKey);
-
+    const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: "API key not configured" }, { status: 500 });
+      return NextResponse.json({ message: "Gemini API key not configured" }, { status: 500 });
     }
 
-    console.log("🔥 Sending request to HuggingFace Router...");
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-    const response = await fetch("https://api-inference.huggingface.co/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemma-2", // free model
-        messages: [{ role: "user", content: message }],
-        max_tokens: 250,
-        temperature: 0.7,
-      }),
-    });
+    const systemPrompt = `You are IntelliFlow's embedded AI assistant.
+Context:
+- Product: IntelliFlow – AI-powered task management (tasks, subtasks, priorities, deadlines, analytics).
+- Frontend: Next.js + React + Tailwind.
+- Backend: REST API (Laravel/Node) and/or Firebase Firestore for persistence.
+- Goal: Provide precise, actionable, and safe guidance tailored to this system.
 
-    console.log("HF STATUS:", response.status);
+Guidelines:
+- Be concise. Prefer bullet points with step-by-step actions.
+- When advising changes in code, specify exact files and minimal diffs.
+- When suggesting tasks or plans, use the existing Priority and Status models.
+- If dates are involved, surface near-term deadlines first and call out overdue items.
+- If uncertain about live data, clearly state assumptions and offer verification steps.
+`;
 
-    let data: any = null;
-    try {
-      data = await response.json();
-      console.log("HF DATA:", JSON.stringify(data).substring(0, 300));
-    } catch {
-      console.log("HF RAW DATA: (not JSON)");
-    }
+    const contextBlock = context
+      ? `\nSystem Context (JSON):\n${JSON.stringify(context)}`
+      : "";
 
-    if (!response.ok) {
-      const errMsg = data?.error?.message || data?.error || `HF API error ${response.status}`;
-      return NextResponse.json({ error: `HF API Error: ${errMsg}` }, { status: response.status });
-    }
+    // Basic history threading: include last few turns inline
+    const historyBlock = Array.isArray(history) && history.length
+      ? `\nRecent Conversation:\n${history
+          .slice(-6)
+          .map((h) => `${h.role.toUpperCase()}: ${h.content}`)
+          .join("\n")}`
+      : "";
 
-    const aiResponse = data?.choices?.[0]?.message?.content || "No response generated.";
+    const composed = `${systemPrompt}${contextBlock}${historyBlock}\n\nUSER: ${prompt}`;
 
-    return NextResponse.json({ response: aiResponse });
-  } catch (error: any) {
-    console.error("CHAT ROUTE ERROR:", error);
-    return NextResponse.json(
-      { error: `Internal server error: ${error.message}` },
-      { status: 500 }
-    );
+    const result = await model.generateContent(composed);
+    const response = await result.response;
+    const text = response.text();
+
+    return NextResponse.json({ text }, { status: 200 });
+  } catch (error) {
+    console.error("Error generating content:", error);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }
