@@ -9,32 +9,70 @@ import {
   Plug,
   Settings,
   LogOut,
-  Plus,
-  Clock,
-  Upload,
   Search,
   Menu,
   X,
-  ChevronRight,
   Zap,
-  TrendingUp,
-  Users,
-  Calendar,
-  FileText,
-  Target,
   Activity,
   CheckCircle2,
-  AlertCircle,
-  PlayCircle,
 } from "lucide-react";
 import { auth } from "@/lib/firebase";
-import { signOut, onAuthStateChanged } from "firebase/auth";
+import { signOut, onAuthStateChanged, updateProfile, type User } from "firebase/auth";
+  function SettingsPanel({ user }: { user: User | null }) {
+    const [displayName, setDisplayName] = useState(user?.displayName || "");
+    const [saving, setSaving] = useState(false);
+    const [message, setMessage] = useState<string | null>(null);
+
+    const handleSave = async () => {
+      if (!user) return;
+      setSaving(true);
+      setMessage(null);
+      try {
+        await updateProfile(user, { displayName });
+        setMessage("Profile updated!");
+      } catch (err: any) {
+        setMessage(err?.message || "Failed to update profile.");
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    return (
+      <div className="max-w-xl mx-auto bg-gray-800 border border-gray-700 rounded-xl p-8 mt-8">
+        <h2 className="text-2xl font-bold text-white mb-4">Settings</h2>
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-300 mb-2">Display Name</label>
+          <input
+            type="text"
+            value={displayName}
+            onChange={e => setDisplayName(e.target.value)}
+            className="w-full px-4 py-2 rounded-lg bg-gray-900 border border-gray-700 text-gray-200 focus:border-blue-500 outline-none"
+            disabled={saving}
+          />
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving || !displayName.trim()}
+          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-semibold disabled:opacity-60"
+        >
+          {saving ? "Saving..." : "Save Changes"}
+        </button>
+        {message && (
+          <div className="mt-4 text-sm text-green-400">{message}</div>
+        )}
+        <div className="mt-8">
+          <h3 className="text-lg font-semibold text-white mb-2">Preferences</h3>
+          <div className="text-gray-400 text-sm">(More settings coming soon)</div>
+        </div>
+      </div>
+    );
+  }
 import { useRouter } from "next/navigation";
 
 export default function IntelliFlowDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false); // Changed to false for mobile-first
   const [activeNav, setActiveNav] = useState("home");
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const router = useRouter();
@@ -76,18 +114,14 @@ export default function IntelliFlowDashboard() {
 
   const navigationItems = [
     { id: "home", icon: Home, label: "Home", active: true },
-    { id: "assistant", icon: Bot, label: "AI Assistant", active: false, badge: "Soon" },
+    { id: "assistant", icon: Bot, label: "AI Assistant", active: true },
     { id: "projects", icon: FolderKanban, label: "Projects", active: true },
     { id: "analytics", icon: BarChart3, label: "Analytics", active: false, badge: "Soon" },
     { id: "integrations", icon: Plug, label: "Integrations", active: false, badge: "Soon" },
     { id: "settings", icon: Settings, label: "Settings", active: true },
   ];
 
-  const quickActions = [
-    { icon: Plus, label: "Create New Task", color: "bg-blue-500", active: true },
-    { icon: Clock, label: "View Recent Activity", color: "bg-teal-500", active: true },
-    { icon: Upload, label: "Upload Data", color: "bg-indigo-500", active: true },
-  ];
+  // Quick Actions removed per request
 
   const recentActivity = [
     { action: 'Created project "Q4 Marketing Plan"', time: "2 hours ago", type: "create" },
@@ -97,17 +131,7 @@ export default function IntelliFlowDashboard() {
     { action: 'Started workflow "Email Campaign"', time: "3 days ago", type: "start" },
   ];
 
-  const activeProjects = [
-    { name: "Q4 Marketing Plan", status: "In Progress", progress: 65, color: "bg-blue-500" },
-    { name: "Website Redesign", status: "Review", progress: 85, color: "bg-green-500" },
-    { name: "Product Launch", status: "Planning", progress: 30, color: "bg-purple-500" },
-  ];
-
-  const todayAgenda = [
-    { time: "10:00 AM", task: "Team standup meeting", type: "meeting" },
-    { time: "2:00 PM", task: "Review design mockups", type: "review" },
-    { time: "4:30 PM", task: "Client presentation", type: "presentation" },
-  ];
+  // (Removed unused activeProjects and todayAgenda)
 
   const keyMetrics = [
     { icon: Zap, label: "Active Workflows", value: "12", change: "+3", trend: "up" },
@@ -118,6 +142,128 @@ export default function IntelliFlowDashboard() {
     { icon: Bot, label: "AI Recommendations", value: "—", sublabel: "AI-powered insights coming soon" },
     { icon: BarChart3, label: "Advanced Analytics", value: "—", sublabel: "Deep insights in Sprint 2" },
   ];
+
+  type ChatMessage = { role: "user" | "model"; content: string };
+
+  function AssistantPanel() {
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [input, setInput] = useState("");
+    const [loading, setLoading] = useState(false);
+
+    const send = async () => {
+      const text = input.trim();
+      if (!text || loading) return;
+      const nextMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
+      setMessages(nextMessages);
+      setInput("");
+      setLoading(true);
+      const controller = new AbortController();
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      try {
+        timeoutHandle = setTimeout(() => controller.abort(), 60000);
+
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: nextMessages }),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          let errMsg = "";
+          try {
+            const errData = await res.json();
+            errMsg = errData?.error || "";
+          } catch {
+            try {
+              errMsg = await res.text();
+            } catch {
+              /* ignore */
+            }
+          }
+          throw new Error(errMsg || `Request failed (${res.status})`);
+        }
+
+        const data = await res.json();
+        const replyText = (data && typeof data.text === "string" ? data.text : "").trim();
+        const reply: ChatMessage = { role: "model", content: replyText || "…" };
+        setMessages((m) => [...m, reply]);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Please try again.";
+        setMessages((m) => [
+          ...m,
+          { role: "model", content: `Sorry, I hit an error: ${msg}` },
+        ]);
+      } finally {
+        setLoading(false);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+      }
+    };
+
+    const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        send();
+      }
+    };
+
+    return (
+      <div className="flex flex-col h-[calc(100vh-4rem-3rem)] sm:h-[calc(100vh-4rem-3rem)]">{/* header/footer heights accounted */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-blue-600/30 border border-blue-600/40 flex items-center justify-center">
+              <Bot className="w-5 h-5 text-blue-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">AI Assistant</h2>
+              <p className="text-xs text-gray-400">Powered by Gemini 1.5 Flash</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 bg-gray-800 border border-gray-700 rounded-xl p-4 overflow-y-auto space-y-3">
+          {messages.length === 0 && (
+            <div className="text-gray-400 text-sm">
+              Start a conversation. Ask about tasks, ideas, or summaries.
+            </div>
+          )}
+          {messages.map((m, idx) => (
+            <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[80%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap ${
+                  m.role === "user"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-900 text-gray-100 border border-gray-700"
+                }`}
+              >
+                {m.content}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="text-gray-500 text-sm italic">Thinking…</div>
+          )}
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Type your message…"
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 outline-none focus:border-blue-500"
+            disabled={loading}
+          />
+          <button
+            onClick={send}
+            disabled={loading}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 rounded-lg text-white text-sm"
+          >
+            Send
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-gray-900 font-sans overflow-hidden">
@@ -130,7 +276,7 @@ export default function IntelliFlowDashboard() {
         {/* Logo Section */}
         <div className="h-16 flex items-center justify-between px-6 border-b border-gray-700">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-teal-500 rounded-lg flex items-center justify-center">
+            <div className="w-8 h-8 bg-linear-to-br from-blue-500 to-teal-500 rounded-lg flex items-center justify-center">
               <Zap className="w-5 h-5 text-white" />
             </div>
             <span className="font-bold text-white">IntelliFlow</span>
@@ -163,7 +309,7 @@ export default function IntelliFlowDashboard() {
                   : "text-gray-600 cursor-not-allowed"
               }`}
             >
-              <item.icon className="w-5 h-5 flex-shrink-0" />
+              <item.icon className="w-5 h-5 shrink-0" />
               <span className="text-sm font-medium flex-1 text-left">
                 {item.label}
               </span>
@@ -182,7 +328,7 @@ export default function IntelliFlowDashboard() {
             onClick={() => setShowLogoutModal(true)}
             className="w-full flex items-center gap-3 px-3 py-2.5 text-gray-300 hover:bg-red-900/30 hover:text-red-400 rounded-lg transition-all"
           >
-            <LogOut className="w-5 h-5 flex-shrink-0" />
+            <LogOut className="w-5 h-5 shrink-0" />
             <span className="text-sm font-medium">Logout</span>
           </button>
         </div>
@@ -226,7 +372,7 @@ export default function IntelliFlowDashboard() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden w-full">
         {/* Header */}
-        <header className="h-16 bg-gray-800 border-b border-gray-700 px-4 sm:px-8 flex items-center justify-between flex-shrink-0">
+        <header className="h-16 bg-gray-800 border-b border-gray-700 px-4 sm:px-8 flex items-center justify-between shrink-0">
           {/* Mobile Menu Button */}
           <button
             onClick={() => setSidebarOpen(true)}
@@ -247,11 +393,10 @@ export default function IntelliFlowDashboard() {
           <div className="flex items-center gap-2 sm:gap-4">
             <div className="flex items-center gap-3 pl-4 border-l border-gray-700">
               <div className="text-right hidden md:block">
-                <div className="text-sm font-medium text-gray-200">{userName}</div>
-                <div className="text-xs text-gray-400">Product Manager</div>
+                <div className="text-sm font-medium text-gray-200">{user?.displayName || user?.email || "User"}</div>
               </div>
-              <button className="w-10 h-10 bg-gradient-to-br from-blue-500 to-teal-500 rounded-full flex items-center justify-center text-white font-semibold hover:shadow-lg transition-shadow">
-                {userName
+              <button className="w-10 h-10 bg-linear-to-br from-blue-500 to-teal-500 rounded-full flex items-center justify-center text-white font-semibold hover:shadow-lg transition-shadow">
+                {(user?.displayName || user?.email || "U")
                   .split(" ")
                   .map((n: string) => n[0])
                   .join("")}
@@ -262,119 +407,106 @@ export default function IntelliFlowDashboard() {
 
         {/* Dashboard Body */}
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-          {/* Welcome Section */}
-          <div className="mb-6 sm:mb-8">
-            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">
-              Welcome back, {userName.split(" ")[0]} 👋
-            </h1>
-            <p className="text-sm sm:text-base text-gray-400">
-              You have{" "}
-              <span className="font-semibold text-blue-400">
-                {pendingTasks} tasks pending
-              </span>
-              . Let's get productive!
-            </p>
-          </div>
-
-          {/* Key Metrics - Central Hub Overview */}
-          <div className="mb-6 sm:mb-8">
-            <h2 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">Performance Overview</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-              {keyMetrics.map((metric, idx) => (
-                <div key={idx} className="bg-gray-800 rounded-xl border border-gray-700 p-5 hover:shadow-lg hover:shadow-black/20 transition-shadow">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className={`w-10 h-10 ${
-                      metric.trend === 'up' ? 'bg-green-500/20' : 
-                      metric.trend === 'down' ? 'bg-red-500/20' : 'bg-gray-700'
-                    } rounded-lg flex items-center justify-center`}>
-                      <metric.icon className={`w-5 h-5 ${
-                        metric.trend === 'up' ? 'text-green-400' : 
-                        metric.trend === 'down' ? 'text-red-400' : 'text-gray-400'
-                      }`} />
-                    </div>
-                    {metric.change !== "0" && (
-                      <span className={`text-xs font-semibold ${
-                        metric.trend === 'up' ? 'text-green-400' : 
-                        metric.trend === 'down' ? 'text-red-400' : 'text-gray-400'
-                      }`}>
-                        {metric.change}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-2xl font-bold text-white mb-1">{metric.value}</div>
-                  <div className="text-xs text-gray-400">{metric.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="mb-6 sm:mb-8">
-            <h2 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">Quick Actions</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-              {quickActions.map((action, idx) => (
-                <button
-                  key={idx}
-                  className="flex items-center gap-4 p-5 bg-gray-800 rounded-xl border border-gray-700 hover:border-blue-500 hover:shadow-lg hover:shadow-black/20 transition-all group"
-                >
-                  <div className={`${action.color} w-12 h-12 rounded-lg flex items-center justify-center text-white group-hover:scale-110 transition-transform`}>
-                    <action.icon className="w-6 h-6" />
-                  </div>
-                  <div className="flex-1 text-left">
-                    <div className="font-medium text-gray-200 text-sm">{action.label}</div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-blue-400 transition-colors" />
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Recent Activity */}
-          <div className="mb-6 sm:mb-8">
-            <div className="bg-gray-800 rounded-xl border border-gray-700 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-white">Recent Activity</h2>
-                <Activity className="w-5 h-5 text-gray-500" />
+          {activeNav === "assistant" ? (
+            <AssistantPanel />
+          ) : activeNav === "settings" ? (
+            <SettingsPanel user={user} />
+          ) : (
+            <>
+              {/* Welcome Section */}
+              <div className="mb-6 sm:mb-8">
+                <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+                  Welcome back, {userName.split(" ")[0]} 👋
+                </h1>
+                <p className="text-sm sm:text-base text-gray-400">
+                  You have{" "}
+                  <span className="font-semibold text-blue-400">
+                    {pendingTasks} tasks pending
+                  </span>
+                  . Let&apos;s get productive!
+                </p>
               </div>
-              <div className="space-y-3">
-                {recentActivity.slice(0, 4).map((item, idx) => (
-                  <div key={idx} className="flex items-start gap-3 pb-3 border-b border-gray-700 last:border-0 last:pb-0">
-                    <div className={`w-2 h-2 rounded-full mt-2 ${
-                      item.type === 'create' ? 'bg-blue-500' :
-                      item.type === 'complete' ? 'bg-green-500' :
-                      item.type === 'update' ? 'bg-amber-500' :
-                      item.type === 'start' ? 'bg-purple-500' :
-                      'bg-pink-500'
-                    }`}></div>
-                    <div className="flex-1">
-                      <p className="text-sm text-gray-200">{item.action}</p>
-                      <p className="text-xs text-gray-500 mt-1">{item.time}</p>
+
+              {/* Key Metrics - Central Hub Overview */}
+              <div className="mb-6 sm:mb-8">
+                <h2 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">Performance Overview</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  {keyMetrics.map((metric, idx) => (
+                    <div key={idx} className="bg-gray-800 rounded-xl border border-gray-700 p-5 hover:shadow-lg hover:shadow-black/20 transition-shadow">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className={`w-10 h-10 ${
+                          metric.trend === 'up' ? 'bg-green-500/20' : 
+                          metric.trend === 'down' ? 'bg-red-500/20' : 'bg-gray-700'
+                        } rounded-lg flex items-center justify-center`}>
+                          <metric.icon className={`w-5 h-5 ${
+                            metric.trend === 'up' ? 'text-green-400' : 
+                            metric.trend === 'down' ? 'text-red-400' : 'text-gray-400'
+                          }`} />
+                        </div>
+                        {metric.change !== "0" && (
+                          <span className={`text-xs font-semibold ${
+                            metric.trend === 'up' ? 'text-green-400' : 
+                            metric.trend === 'down' ? 'text-red-400' : 'text-gray-400'
+                          }`}>
+                            {metric.change}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-2xl font-bold text-white mb-1">{metric.value}</div>
+                      <div className="text-xs text-gray-400">{metric.label}</div>
                     </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Recent Activity */}
+              <div className="mb-6 sm:mb-8">
+                <div className="bg-gray-800 rounded-xl border border-gray-700 p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-white">Recent Activity</h2>
+                    <Activity className="w-5 h-5 text-gray-500" />
+                  </div>
+                  <div className="space-y-3">
+                    {recentActivity.slice(0, 4).map((item, idx) => (
+                      <div key={idx} className="flex items-start gap-3 pb-3 border-b border-gray-700 last:border-0 last:pb-0">
+                        <div className={`w-2 h-2 rounded-full mt-2 ${
+                          item.type === 'create' ? 'bg-blue-500' :
+                          item.type === 'complete' ? 'bg-green-500' :
+                          item.type === 'update' ? 'bg-amber-500' :
+                          item.type === 'start' ? 'bg-purple-500' :
+                          'bg-pink-500'
+                        }`}></div>
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-200">{item.action}</p>
+                          <p className="text-xs text-gray-500 mt-1">{item.time}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* AI Features Placeholder Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                {placeholderCards.map((card, idx) => (
+                  <div key={idx} className="bg-linear-to-br from-blue-900/40 to-purple-900/40 rounded-xl border border-blue-700/50 p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-12 h-12 bg-gray-800 rounded-lg flex items-center justify-center shadow-sm border border-gray-700">
+                        <card.icon className="w-6 h-6 text-blue-400" />
+                      </div>
+                      <span className="text-base font-semibold text-white">{card.label}</span>
+                    </div>
+                    <div className="text-4xl font-bold text-gray-600 mb-2">{card.value}</div>
+                    <p className="text-sm text-gray-400">{card.sublabel}</p>
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-
-          {/* AI Features Placeholder Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-            {placeholderCards.map((card, idx) => (
-              <div key={idx} className="bg-gradient-to-br from-blue-900/40 to-purple-900/40 rounded-xl border border-blue-700/50 p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-12 h-12 bg-gray-800 rounded-lg flex items-center justify-center shadow-sm border border-gray-700">
-                    <card.icon className="w-6 h-6 text-blue-400" />
-                  </div>
-                  <span className="text-base font-semibold text-white">{card.label}</span>
-                </div>
-                <div className="text-4xl font-bold text-gray-600 mb-2">{card.value}</div>
-                <p className="text-sm text-gray-400">{card.sublabel}</p>
-              </div>
-            ))}
-          </div>
+            </>
+          )}
         </div>
 
         {/* Footer */}
-        <footer className="h-auto sm:h-12 bg-gray-800 border-t border-gray-700 px-4 sm:px-8 py-3 sm:py-0 flex flex-col sm:flex-row items-center justify-between text-xs text-gray-400 gap-2 sm:gap-0 flex-shrink-0">
+        <footer className="h-auto sm:h-12 bg-gray-800 border-t border-gray-700 px-4 sm:px-8 py-3 sm:py-0 flex flex-col sm:flex-row items-center justify-between text-xs text-gray-400 gap-2 sm:gap-0 shrink-0">
           <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-6">
             <a href="#" className="hover:text-blue-400 transition-colors">Help & Support</a>
             <span className="text-gray-600 hidden sm:inline">•</span>
