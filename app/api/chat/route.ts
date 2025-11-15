@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleAI } from "@google/generative-ai";
 
 export const runtime = "nodejs";
 
@@ -20,46 +20,50 @@ export async function POST(req: NextRequest) {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     const userText = lastUser?.content?.toString() || "";
     if (!userText.trim()) {
-      return new Response(
-        JSON.stringify({ error: "Empty prompt" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "Empty prompt" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey);
+    // ✅ Correct client import
+    const genAI = new GoogleAI({ apiKey });
 
-    // 1️⃣ List models your key can access
-    const list = await genAI.listModels?.();
-    const allModels = Array.isArray(list?.models) ? list.models : [];
+    // 1️⃣ List available models correctly
+    const list = await genAI.models.list();
+    const allModels = list?.models ?? [];
 
-    // 2️⃣ Filter models that support generateContent
+    // 2️⃣ Filter models supporting generateContent
     const generateModels = allModels.filter((m: any) =>
       m.supportedGenerationMethods?.includes("generateContent")
     );
 
     if (!generateModels.length) {
       return new Response(
-        JSON.stringify({ error: "No available models support generateContent" }),
+        JSON.stringify({
+          error: "No available models support generateContent",
+        }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // 3️⃣ Pick the first supported model
+    // 3️⃣ Choose a model
     const activeModelName = generateModels[0].name;
 
     // 4️⃣ Start chat with history
-    const model = genAI.getGenerativeModel({ model: activeModelName });
+    const model = genAI.models.get(activeModelName);
+
     const history = messages
       .filter((m) => m.content && m.content.trim())
       .map((m) => ({
-        role: m.role === "user" ? "user" : "model",
+        role: m.role,
         parts: [{ text: m.content }],
       }));
 
-    const chat = model.startChat({ history });
+    const chat = await model.startChat({ history });
+
     const result = await chat.sendMessage(userText);
-    const response = await result.response;
-    const text = response.text();
+    const text = result.response.text();
 
     return new Response(JSON.stringify({ model: activeModelName, text }), {
       status: 200,
@@ -67,9 +71,9 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return new Response(
-      JSON.stringify({ error: message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 }
