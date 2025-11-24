@@ -11,9 +11,11 @@ import {
   Menu,
   X,
   Zap,
+  Edit2,
+  User as UserIcon,
 } from "lucide-react";
 import { auth } from "@/lib/firebase";
-import { signOut, onAuthStateChanged, User } from "firebase/auth";
+import { signOut, onAuthStateChanged, User, updateProfile } from "firebase/auth";
 import { useRouter, usePathname } from "next/navigation";
 
 interface LayoutProps {
@@ -23,6 +25,9 @@ interface LayoutProps {
 export default function DashboardLayout({ children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showEditNameModal, setShowEditNameModal] = useState(false);
+  const [newDisplayName, setNewDisplayName] = useState("");
+  const [isUpdatingName, setIsUpdatingName] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
@@ -48,6 +53,38 @@ export default function DashboardLayout({ children }: LayoutProps) {
     } catch (error) {
       console.error("Logout error:", error);
     }
+  };
+
+  const handleUpdateDisplayName = async () => {
+    if (!user || !newDisplayName.trim()) {
+      alert("Please enter a valid name");
+      return;
+    }
+
+    setIsUpdatingName(true);
+    try {
+      await updateProfile(user, {
+        displayName: newDisplayName.trim(),
+      });
+      
+      // Force refresh the user object
+      await user.reload();
+      setUser(auth.currentUser);
+      
+      setShowEditNameModal(false);
+      setNewDisplayName("");
+      alert("Display name updated successfully!");
+    } catch (error: any) {
+      console.error("Error updating display name:", error);
+      alert(`Failed to update name: ${error.message}`);
+    } finally {
+      setIsUpdatingName(false);
+    }
+  };
+
+  const openEditNameModal = () => {
+    setNewDisplayName(getUserDisplayName());
+    setShowEditNameModal(true);
   };
 
   const getActiveNav = () => {
@@ -168,6 +205,60 @@ export default function DashboardLayout({ children }: LayoutProps) {
         </div>
       </aside>
 
+      {/* Edit Name Modal */}
+      {showEditNameModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50 p-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-blue-500/20 rounded-full flex items-center justify-center">
+                <Edit2 className="w-6 h-6 text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">Edit Display Name</h3>
+                <p className="text-sm text-gray-400">Update your profile name</p>
+              </div>
+            </div>
+            
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Display Name
+              </label>
+              <input
+                type="text"
+                value={newDisplayName}
+                onChange={(e) => setNewDisplayName(e.target.value)}
+                placeholder="Enter your name"
+                className="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={isUpdatingName}
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                This name will be displayed across your dashboard
+              </p>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowEditNameModal(false);
+                  setNewDisplayName("");
+                }}
+                className="flex-1 px-4 py-2.5 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
+                disabled={isUpdatingName}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdateDisplayName}
+                disabled={isUpdatingName || !newDisplayName.trim()}
+                className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+              >
+                {isUpdatingName ? "Updating..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Logout Modal */}
       {showLogoutModal && (
         <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/50 p-4">
@@ -217,15 +308,21 @@ export default function DashboardLayout({ children }: LayoutProps) {
           <div className="flex-1" />
 
           <div className="flex items-center gap-2 sm:gap-4">
-            <div className="flex items-center gap-3 pl-4 border-l border-gray-700">
+            <button 
+              onClick={openEditNameModal}
+              className="flex items-center gap-3 pl-4 border-l border-gray-700 hover:bg-gray-700/50 rounded-lg p-2 transition-colors group"
+            >
               <div className="text-right hidden md:block">
-                <div className="text-sm font-medium text-gray-200">{userName}</div>
+                <div className="text-sm font-medium text-gray-200 flex items-center gap-2">
+                  {userName}
+                  <Edit2 className="w-3 h-3 text-gray-500 group-hover:text-blue-400 transition-colors" />
+                </div>
                 <div className="text-xs text-gray-400">{user.email}</div>
               </div>
-              <button className="w-10 h-10 bg-gradient-to-br from-blue-500 to-teal-500 rounded-full flex items-center justify-center text-white font-semibold hover:shadow-lg transition-shadow">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-teal-500 rounded-full flex items-center justify-center text-white font-semibold hover:shadow-lg transition-shadow">
                 {userInitials}
-              </button>
-            </div>
+              </div>
+            </button>
           </div>
         </header>
 
