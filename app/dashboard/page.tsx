@@ -103,12 +103,13 @@ export default function DashboardPage() {
     return () => unsubscribe();
   }, [user]);
 
-  // Load recent activity from Firestore
+  // Load recent activity from Firestore - FIXED to filter by user
   useEffect(() => {
     if (!user) return;
 
     const q = query(
       collection(db, "activity"),
+      where("userId", "==", user.uid),
       orderBy("timestamp", "desc"),
       limit(10)
     );
